@@ -441,10 +441,18 @@ async function callGemini(userText, isInit = false) {
     generationConfig: { temperature: 0.85, maxOutputTokens: 400 }
   };
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.apiKey}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-  );
+  let res, attempts = 0;
+  while (attempts < 3) {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${state.apiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    if (res.status === 429) {
+      attempts++;
+      if (attempts < 3) await new Promise(r => setTimeout(r, 35000));
+      else { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || 'Quota exceeded'); }
+    } else break;
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -626,7 +634,10 @@ async function sendMessage(text) {
     addMessage('tutor', reply);
   } catch(e) {
     removeTyping();
-    addMessage('tutor', `⚠️ Error: ${e.message}. Check your API key.`);
+    const isQuota = e.message.toLowerCase().includes('quota') || e.message.includes('429');
+    addMessage('tutor', isQuota
+      ? '⏳ Limite de requisições atingido. Aguarde 1 minuto e tente novamente. Dica: no Google AI Studio, ative o billing para remover esse limite — não cobra no free tier.'
+      : `⚠️ Erro: ${e.message}`);
   }
   isLoading = false;
 }
