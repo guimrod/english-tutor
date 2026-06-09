@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<meta name="theme-color" content="#0a0f1e"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="English Tutor"/>
+<title>English Tutor</title>
+<link rel="manifest" href="/manifest.json"/>
+<style>
+  :root {
+    --bg:        #0a0f1e;
+    --surface:   #111827;
+    --surface2:  #1a2235;
+    --border:    rgba(255,255,255,0.08);
+    --accent:    #3b82f6;
+    --accent2:   #06b6d4;
+    --green:     #22c55e;
+    --amber:     #f59e0b;
+    --red:       #ef4444;
+    --text:      #f1f5f9;
+    --muted:     #64748b;
+    --subtle:    #1e293b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', sans-serif; overflow: hidden; }
+
+  /* ── SCREENS ── */
+  .screen { display: none; flex-direction: column; height: 100vh; }
+  .screen.active { display: flex; }
+
+  /* ── SETUP SCREEN ── */
+  #setup { align-items: center; justify-content: center; padding: 32px 24px; gap: 24px; }
+  .logo { font-size: 52px; }
+  .logo-title { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+  .logo-sub { color: var(--muted); font-size: 14px; text-align: center; line-height: 1.5; max-width: 280px; }
+  .setup-form { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 12px; }
+  .field-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .field-input {
+    width: 100%; padding: 14px 16px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px;
+    color: var(--text); font-size: 15px; outline: none;
+    transition: border 0.2s;
+  }
+  .field-input:focus { border-color: var(--accent); }
+  .field-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .btn-primary {
+    width: 100%; padding: 15px; border-radius: 14px; border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; font-size: 16px; font-weight: 700; cursor: pointer;
+    transition: opacity 0.2s; margin-top: 4px;
+  }
+  .btn-primary:active { opacity: 0.85; }
+  .btn-primary:disabled { opacity: 0.4; }
+
+  /* ── CHAT SCREEN ── */
+  #chat { background: var(--bg); }
+
+  .chat-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; background: var(--surface);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+    padding-top: max(14px, env(safe-area-inset-top));
+  }
+  .header-left { display: flex; flex-direction: column; }
+  .header-title { font-size: 15px; font-weight: 700; }
+  .header-mode { font-size: 11px; color: var(--accent2); margin-top: 1px; }
+  .header-right { display: flex; gap: 8px; align-items: center; }
+
+  .level-badge {
+    background: var(--subtle); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px 10px; font-size: 11px;
+    font-weight: 700; color: var(--accent2); cursor: pointer;
+  }
+  .icon-btn {
+    width: 34px; height: 34px; border-radius: 50%; border: none;
+    background: var(--subtle); color: var(--muted); font-size: 16px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+
+  /* messages */
+  .messages {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .msg { max-width: 88%; display: flex; flex-direction: column; gap: 4px; }
+  .msg.tutor { align-self: flex-start; }
+  .msg.user  { align-self: flex-end; }
+
+  .bubble {
+    padding: 12px 15px; border-radius: 18px; font-size: 15px; line-height: 1.55;
+  }
+  .tutor .bubble {
+    background: var(--surface2); border-bottom-left-radius: 4px; color: var(--text);
+  }
+  .user .bubble {
+    background: linear-gradient(135deg, var(--accent), #2563eb);
+    border-bottom-right-radius: 4px; color: #fff;
+  }
+
+  .correction-note {
+    font-size: 12px; color: var(--amber); background: rgba(245,158,11,0.08);
+    border: 1px solid rgba(245,158,11,0.2); border-radius: 10px;
+    padding: 7px 11px; line-height: 1.5; margin-top: 2px;
+  }
+
+  .fluency-note {
+    font-size: 12px; color: var(--accent2); background: rgba(6,182,212,0.07);
+    border: 1px solid rgba(6,182,212,0.18); border-radius: 10px;
+    padding: 7px 11px; line-height: 1.5; margin-top: 2px;
+  }
+
+  .mode-chip {
+    align-self: flex-start; background: rgba(59,130,246,0.12);
+    border: 1px solid rgba(59,130,246,0.25); border-radius: 20px;
+    padding: 4px 12px; font-size: 11px; color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  .typing {
+    display: flex; gap: 4px; align-items: center;
+    padding: 12px 15px; background: var(--surface2);
+    border-radius: 18px; border-bottom-left-radius: 4px;
+    width: fit-content;
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--muted);
+    animation: bounce 1.2s infinite;
+  }
+  .dot:nth-child(2) { animation-delay: 0.2s; }
+  .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce {
+    0%,60%,100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+  }
+
+  /* input area */
+  .input-area {
+    padding: 12px 16px; background: var(--surface);
+    border-top: 1px solid var(--border); flex-shrink: 0;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  .input-row { display: flex; gap: 10px; align-items: flex-end; }
+  .text-input {
+    flex: 1; background: var(--subtle); border: 1px solid var(--border);
+    border-radius: 22px; padding: 11px 16px; color: var(--text);
+    font-size: 15px; outline: none; resize: none; max-height: 120px;
+    line-height: 1.4; transition: border 0.2s;
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+  }
+  .text-input:focus { border-color: var(--accent); }
+
+  .mic-btn {
+    width: 46px; height: 46px; border-radius: 50%; border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; font-size: 20px; cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s; box-shadow: 0 2px 12px rgba(59,130,246,0.3);
+  }
+  .mic-btn.recording {
+    background: linear-gradient(135deg, var(--red), #dc2626);
+    box-shadow: 0 0 0 6px rgba(239,68,68,0.2), 0 2px 12px rgba(239,68,68,0.4);
+    animation: pulse 1.4s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+    70%  { box-shadow: 0 0 0 12px rgba(239,68,68,0); }
+    100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+  }
+  .send-btn {
+    width: 46px; height: 46px; border-radius: 50%; border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; font-size: 18px; cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.2s;
+  }
+  .send-btn:disabled { opacity: 0.3; }
+
+  /* progress bar */
+  .progress-bar {
+    height: 2px; background: var(--border); flex-shrink: 0;
+  }
+  .progress-fill {
+    height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width 0.6s ease;
+  }
+
+  /* profile panel */
+  #profile-panel {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    z-index: 100; display: none; align-items: flex-end;
+  }
+  #profile-panel.open { display: flex; }
+  .profile-sheet {
+    width: 100%; background: var(--surface); border-radius: 20px 20px 0 0;
+    padding: 24px 20px; padding-bottom: max(24px, env(safe-area-inset-bottom));
+    max-height: 80vh; overflow-y: auto;
+  }
+  .sheet-handle { width: 40px; height: 4px; background: var(--border); border-radius: 4px; margin: 0 auto 20px; }
+  .sheet-title { font-size: 17px; font-weight: 700; margin-bottom: 16px; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .stat-card { background: var(--subtle); border-radius: 12px; padding: 14px; }
+  .stat-val { font-size: 24px; font-weight: 800; color: var(--accent); }
+  .stat-lbl { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .error-list { display: flex; flex-direction: column; gap: 8px; }
+  .error-item {
+    background: var(--subtle); border-radius: 10px; padding: 10px 13px;
+    font-size: 13px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .error-count { background: rgba(245,158,11,0.15); color: var(--amber); border-radius: 20px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+  .section-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; margin-top: 4px; }
+
+  /* level bar */
+  .level-track { background: var(--subtle); border-radius: 8px; height: 8px; overflow: hidden; margin-top: 6px; }
+  .level-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 8px; transition: width 0.6s; }
+
+  .toast {
+    position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 10px 20px; font-size: 13px; color: var(--text);
+    z-index: 200; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap;
+  }
+  .toast.show { opacity: 1; }
+
+  .tts-btn {
+    background: none; border: none; color: var(--muted); font-size: 14px;
+    cursor: pointer; padding: 2px 4px; margin-top: 2px; align-self: flex-start;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── SETUP SCREEN ── -->
+<div id="setup" class="screen active">
+  <div class="logo">🎙️</div>
+  <div class="logo-title">English Tutor</div>
+  <div class="logo-sub">Conversação real com um tutor que te conduz — e responde quando você manda.</div>
+  <div class="setup-form">
+    <div>
+      <div class="field-label">Sua chave do Gemini</div>
+      <input class="field-input" id="api-key-input" type="password" placeholder="AIza..."/>
+      <div class="field-hint">Gratuita em <strong>aistudio.google.com</strong> → Get API Key</div>
+    </div>
+    <div>
+      <div class="field-label">Seu nome (opcional)</div>
+      <input class="field-input" id="name-input" type="text" placeholder="ex: Guilherme"/>
+    </div>
+    <button class="btn-primary" id="start-btn" onclick="startApp()">Começar →</button>
+  </div>
+</div>
+
+<!-- ── CHAT SCREEN ── -->
+<div id="chat" class="screen">
+  <div class="chat-header">
+    <div class="header-left">
+      <div class="header-title">English Tutor</div>
+      <div class="header-mode" id="mode-label">Conversação livre</div>
+    </div>
+    <div class="header-right">
+      <div class="level-badge" id="level-badge" onclick="openProfile()">A2</div>
+      <button class="icon-btn" onclick="toggleTTS()" id="tts-toggle" title="Voz do tutor">🔇</button>
+      <button class="icon-btn" onclick="openProfile()" title="Perfil">📊</button>
+    </div>
+  </div>
+  <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+
+  <div class="messages" id="messages"></div>
+
+  <div class="input-area">
+    <div class="input-row">
+      <textarea class="text-input" id="text-input" placeholder="Type or use mic…" rows="1"
+        onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button class="mic-btn" id="mic-btn" onclick="toggleMic()">🎤</button>
+      <button class="send-btn" id="send-btn" onclick="sendText()" disabled>➤</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PROFILE PANEL ── -->
+<div id="profile-panel" onclick="closeProfile(event)">
+  <div class="profile-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Seu Progresso</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-val" id="stat-sessions">0</div><div class="stat-lbl">sessões</div></div>
+      <div class="stat-card"><div class="stat-val" id="stat-msgs">0</div><div class="stat-lbl">trocas hoje</div></div>
+      <div class="stat-card"><div class="stat-val" id="stat-corrections">0</div><div class="stat-lbl">correções totais</div></div>
+      <div class="stat-card"><div class="stat-val" id="stat-level">A2</div><div class="stat-lbl">nível atual</div></div>
+    </div>
+    <div class="section-label">Nível de fluência</div>
+    <div id="level-detail" style="font-size:13px; color:var(--muted); margin-bottom:6px;"></div>
+    <div class="level-track"><div class="level-fill" id="level-fill" style="width:0%"></div></div>
+    <div style="height:20px;"></div>
+    <div class="section-label">Erros mais frequentes</div>
+    <div class="error-list" id="error-list">
+      <div style="color:var(--muted);font-size:13px;">Nenhum erro registrado ainda.</div>
+    </div>
+    <div style="height:16px;"></div>
+    <button class="btn-primary" onclick="closeProfile(null)" style="margin-top:4px;">Fechar</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────
+const LEVELS = ['A2','B1','B2','C1','C2'];
+const LEVEL_NAMES = { A2:'Básico', B1:'Intermediário', B2:'Intermediário avançado', C1:'Avançado', C2:'Fluente' };
+const LEVEL_XP = { A2:0, B1:200, B2:500, C1:900, C2:1400 };
+const NEXT_XP  = { A2:200, B1:500, B2:900, C1:1400, C2:9999 };
+
+let state = {
+  apiKey: '', userName: '',
+  level: 'A2', xp: 0,
+  sessions: 0, totalMsgs: 0, totalCorrections: 0,
+  errorMap: {},         // { "pattern": count }
+  reviewQueue: [],      // [{ pattern, nextReview: timestamp }]
+  coveredTopics: [],
+  lastSession: null,
+};
+
+let conversation = [];  // [{ role, parts }] for Gemini
+let currentMode = 'free';  // free | scene | native
+let ttsEnabled = false;
+let isLoading = false;
+let recognition = null;
+let isRecording = false;
+
+// ── STORAGE ───────────────────────────────────────────────────────────────
+function saveState() { localStorage.setItem('et_state', JSON.stringify(state)); }
+function loadState() {
+  const s = localStorage.getItem('et_state');
+  if (s) state = { ...state, ...JSON.parse(s) };
+}
+function saveTTS() { localStorage.setItem('et_tts', ttsEnabled ? '1' : '0'); }
+function loadTTS() { ttsEnabled = localStorage.getItem('et_tts') === '1'; }
+
+// ── SETUP ─────────────────────────────────────────────────────────────────
+loadState(); loadTTS();
+
+// Pre-fill if returning user
+window.addEventListener('DOMContentLoaded', () => {
+  if (state.apiKey) {
+    document.getElementById('api-key-input').value = state.apiKey;
+    document.getElementById('name-input').value = state.userName || '';
+  }
+  updateTTSIcon();
+});
+
+function startApp() {
+  const key = document.getElementById('api-key-input').value.trim();
+  const name = document.getElementById('name-input').value.trim();
+  if (!key) { showToast('Cole sua chave do Gemini'); return; }
+  state.apiKey = key;
+  state.userName = name || 'you';
+  state.sessions += 1;
+  state.lastSession = Date.now();
+  saveState();
+  document.getElementById('setup').classList.remove('active');
+  document.getElementById('chat').classList.add('active');
+  initChat();
+}
+
+// ── CHAT INIT ─────────────────────────────────────────────────────────────
+function buildSystemPrompt() {
+  const errSummary = Object.entries(state.errorMap)
+    .sort((a,b) => b[1]-a[1]).slice(0,5)
+    .map(([k,v]) => `"${k}" (${v}x)`).join(', ') || 'none yet';
+
+  const reviewDue = state.reviewQueue
+    .filter(r => Date.now() >= r.nextReview)
+    .map(r => r.pattern).slice(0,3);
+
+  return `You are an immersive English conversation tutor for a Brazilian adult (intermediate level, current CEFR: ${state.level}).
+Your student's name is ${state.userName}. They have had ${state.sessions} sessions with you.
+
+CORE MISSION: Help them sound like a native speaker — real spoken English, contractions, linking sounds, phrasal verbs, colloquialisms, the kind of English heard in movies and from native speakers. Push them beyond textbook English.
+
+YOUR BEHAVIOR:
+- YOU always initiate topics and drive the conversation forward. Never ask "what do you want to talk about?"
+- Alternate naturally between casual chat, cultural references (movies/series/music), and educational moments
+- As the student shows comfort, increase complexity: richer vocabulary, idioms, faster-paced structures
+- If the student says something like "let's do more of this" or "can we focus on X" — IMMEDIATELY pivot and go deep on that. Stay on it until they signal otherwise.
+- Keep responses conversational length — not too long. You're texting a friend, not writing an essay.
+
+MODES you can enter (announce with a short chip label):
+- [Scene Immersion] — propose a real-life situation ("You're at a bar in NYC, stranger says: 'Rough day, huh?'"). React as that character.
+- [Decode the Native] — throw a phrase as natives actually say it: "Whaddya think?", "I coulda sworn", "Lemme know". Ask them to decode and use it.
+- Switch modes naturally or when student requests.
+
+CORRECTIONS (every response where there's something to fix):
+1. First, respond naturally — woven into your reply, use the correct form of what they said wrong, without highlighting it
+2. At the END of your message, add a correction note in this exact format:
+💡 [what they said] → [how a native says it] — [one-line explanation in Portuguese]
+Only correct 1-2 things max per message. Pick the most important.
+
+FLUENCY NOTE (when relevant, not every message):
+Add at end: 🗣️ [brief observation about their sentence structure, flow, or naturalness — in Portuguese, 1 line]
+
+SPACED REVIEW: These patterns need revisiting today (weave them in naturally): ${reviewDue.length ? reviewDue.join(', ') : 'none'}
+
+STUDENT PROFILE:
+- Level: ${state.level} (${LEVEL_NAMES[state.level]})  
+- XP: ${state.xp}
+- Sessions: ${state.sessions}
+- Top errors to watch: ${errSummary}
+- Topics already covered: ${state.coveredTopics.slice(-10).join(', ') || 'none yet'}
+
+XP SYSTEM (internal — do not mention to student):
+At the end of each of your messages, append hidden metadata on the very last line in this exact format with no spaces:
+|||XP:N|ERRORS:tag1,tag2|TOPIC:topicname|||
+Where N = XP to award this turn (5=basic response, 10=good, 15=excellent/complex), ERRORS = comma-separated short tags for errors found (or NONE), TOPIC = one-word topic of this exchange.
+This line will be parsed and removed before display.`;
+}
+
+async function initChat() {
+  updateLevelUI();
+  updateProfileStats();
+  conversation = [];
+  currentMode = 'free';
+
+  // Opening message from tutor
+  const opening = await callGemini("START_SESSION", true);
+  addMessage('tutor', opening);
+}
+
+// ── GEMINI API ─────────────────────────────────────────────────────────────
+async function callGemini(userText, isInit = false) {
+  if (!isInit) {
+    conversation.push({ role: 'user', parts: [{ text: userText }] });
+  }
+
+  const body = {
+    system_instruction: { parts: [{ text: buildSystemPrompt() }] },
+    contents: isInit
+      ? [{ role: 'user', parts: [{ text: `START_SESSION: Greet ${state.userName} naturally and start an engaging conversation topic. Remember their level is ${state.level} and they've had ${state.sessions} sessions.` }] }]
+      : conversation,
+    generationConfig: { temperature: 0.85, maxOutputTokens: 400 }
+  };
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.apiKey}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+  // Parse hidden metadata
+  const metaMatch = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|\|\|/);
+  if (metaMatch) {
+    const xpGain = parseInt(metaMatch[1]) || 5;
+    const errors = metaMatch[2] !== 'NONE' ? metaMatch[2].split(',').map(s=>s.trim()).filter(Boolean) : [];
+    const topic = metaMatch[3].trim();
+    text = text.replace(/\|\|\|XP:\d+\|ERRORS:[^|]+\|TOPIC:[^|]+\|\|\|\n?/, '').trim();
+
+    // Update state
+    state.xp += xpGain;
+    errors.forEach(e => { state.errorMap[e] = (state.errorMap[e] || 0) + 1; });
+    if (errors.length) state.totalCorrections += errors.length;
+    if (topic && !state.coveredTopics.includes(topic)) state.coveredTopics.push(topic);
+
+    // Spaced review: schedule errors for future review
+    errors.forEach(e => {
+      const existing = state.reviewQueue.find(r => r.pattern === e);
+      if (!existing) {
+        state.reviewQueue.push({ pattern: e, nextReview: Date.now() + 86400000 }); // 1 day
+      } else {
+        // Double the interval (spaced repetition)
+        const interval = existing.nextReview - Date.now();
+        existing.nextReview = Date.now() + Math.min(interval * 2, 7 * 86400000);
+      }
+    });
+
+    checkLevelUp();
+    state.totalMsgs += 1;
+    saveState();
+    updateLevelUI();
+    updateProfileStats();
+  }
+
+  if (!isInit) {
+    conversation.push({ role: 'model', parts: [{ text }] });
+  }
+
+  return text;
+}
+
+// ── LEVEL UP ──────────────────────────────────────────────────────────────
+function checkLevelUp() {
+  const idx = LEVELS.indexOf(state.level);
+  if (idx < LEVELS.length - 1) {
+    const next = LEVELS[idx + 1];
+    if (state.xp >= LEVEL_XP[next]) {
+      state.level = next;
+      showToast(`🎉 Level up! Now ${state.level} — ${LEVEL_NAMES[state.level]}`);
+    }
+  }
+}
+
+function updateLevelUI() {
+  const badge = document.getElementById('level-badge');
+  if (badge) badge.textContent = state.level;
+  const idx = LEVELS.indexOf(state.level);
+  const cur = LEVEL_XP[state.level];
+  const nxt = NEXT_XP[state.level];
+  const pct = Math.min(100, Math.round(((state.xp - cur) / (nxt - cur)) * 100));
+  const fill = document.getElementById('progress-fill');
+  if (fill) fill.style.width = pct + '%';
+}
+
+// ── MESSAGES ──────────────────────────────────────────────────────────────
+function parseMessage(text) {
+  // Extract mode chip
+  const modeMatch = text.match(/^\[(Scene Immersion|Decode the Native)\]/);
+  let mode = null, body = text;
+  if (modeMatch) {
+    mode = modeMatch[1];
+    body = text.slice(modeMatch[0].length).trim();
+    currentMode = mode === 'Scene Immersion' ? 'scene' : 'native';
+    document.getElementById('mode-label').textContent =
+      mode === 'Scene Immersion' ? '🎭 Imersão de Cena' : '🔍 Decifra o Nativo';
+  }
+
+  // Split correction note and fluency note
+  const corrMatch = body.match(/(💡.+?)(?=🗣️|$)/s);
+  const fluMatch  = body.match(/🗣️.+/s);
+  let main = body;
+  let corr = null, flu = null;
+
+  if (corrMatch) { corr = corrMatch[1].trim(); main = main.replace(corrMatch[1], '').trim(); }
+  if (fluMatch)  { flu  = fluMatch[0].trim();  main = main.replace(fluMatch[0], '').trim(); }
+
+  return { mode, main: main.trim(), corr, flu };
+}
+
+function addMessage(role, text) {
+  const msgs = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = `msg ${role}`;
+
+  if (role === 'tutor') {
+    const { mode, main, corr, flu } = parseMessage(text);
+
+    if (mode) {
+      const chip = document.createElement('div');
+      chip.className = 'mode-chip';
+      chip.textContent = mode === 'Scene Immersion' ? '🎭 Imersão de Cena' : '🔍 Decifra o Nativo';
+      wrap.appendChild(chip);
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = main;
+    wrap.appendChild(bubble);
+
+    // TTS button
+    const ttsBtn = document.createElement('button');
+    ttsBtn.className = 'tts-btn';
+    ttsBtn.textContent = '🔊';
+    ttsBtn.title = 'Ouvir';
+    ttsBtn.onclick = () => speak(main);
+    wrap.appendChild(ttsBtn);
+
+    if (corr) {
+      const cn = document.createElement('div');
+      cn.className = 'correction-note';
+      cn.textContent = corr;
+      wrap.appendChild(cn);
+    }
+    if (flu) {
+      const fn = document.createElement('div');
+      fn.className = 'fluency-note';
+      fn.textContent = flu;
+      wrap.appendChild(fn);
+    }
+
+    // Auto TTS
+    if (ttsEnabled) speak(main);
+  } else {
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    wrap.appendChild(bubble);
+  }
+
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function showTyping() {
+  const msgs = document.getElementById('messages');
+  const t = document.createElement('div');
+  t.className = 'msg tutor'; t.id = 'typing-indicator';
+  t.innerHTML = '<div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
+  msgs.appendChild(t);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+function removeTyping() {
+  document.getElementById('typing-indicator')?.remove();
+}
+
+// ── SEND ──────────────────────────────────────────────────────────────────
+async function sendMessage(text) {
+  if (!text.trim() || isLoading) return;
+  isLoading = true;
+  document.getElementById('send-btn').disabled = true;
+
+  addMessage('user', text);
+  document.getElementById('text-input').value = '';
+  autoResize(document.getElementById('text-input'));
+  document.getElementById('send-btn').disabled = true;
+
+  showTyping();
+  try {
+    const reply = await callGemini(text);
+    removeTyping();
+    addMessage('tutor', reply);
+  } catch(e) {
+    removeTyping();
+    addMessage('tutor', `⚠️ Error: ${e.message}. Check your API key.`);
+  }
+  isLoading = false;
+}
+
+function sendText() {
+  const val = document.getElementById('text-input').value.trim();
+  if (val) sendMessage(val);
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendText();
+  }
+}
+
+document.getElementById('text-input').addEventListener('input', function() {
+  document.getElementById('send-btn').disabled = !this.value.trim();
+});
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// ── VOICE ─────────────────────────────────────────────────────────────────
+function toggleMic() {
+  if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+    showToast('Use Chrome para reconhecimento de voz'); return;
+  }
+  if (isRecording) {
+    recognition?.stop(); return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = 'en-US';
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.onstart = () => {
+    isRecording = true;
+    document.getElementById('mic-btn').classList.add('recording');
+    document.getElementById('mic-btn').textContent = '⏹';
+  };
+  recognition.onend = () => {
+    isRecording = false;
+    document.getElementById('mic-btn').classList.remove('recording');
+    document.getElementById('mic-btn').textContent = '🎤';
+  };
+  recognition.onresult = e => {
+    const t = e.results[0][0].transcript;
+    sendMessage(t);
+  };
+  recognition.onerror = () => {
+    isRecording = false;
+    document.getElementById('mic-btn').classList.remove('recording');
+    document.getElementById('mic-btn').textContent = '🎤';
+  };
+  recognition.start();
+}
+
+// ── TTS ───────────────────────────────────────────────────────────────────
+function speak(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'en-US'; u.rate = 0.88;
+  window.speechSynthesis.speak(u);
+}
+
+function toggleTTS() {
+  ttsEnabled = !ttsEnabled;
+  saveTTS();
+  updateTTSIcon();
+  showToast(ttsEnabled ? '🔊 Voz do tutor ativada' : '🔇 Voz desativada');
+}
+
+function updateTTSIcon() {
+  const btn = document.getElementById('tts-toggle');
+  if (btn) btn.textContent = ttsEnabled ? '🔊' : '🔇';
+}
+
+// ── PROFILE ───────────────────────────────────────────────────────────────
+function openProfile() {
+  updateProfileStats();
+  document.getElementById('profile-panel').classList.add('open');
+}
+function closeProfile(e) {
+  if (!e || e.target === document.getElementById('profile-panel')) {
+    document.getElementById('profile-panel').classList.remove('open');
+  }
+}
+
+function updateProfileStats() {
+  document.getElementById('stat-sessions').textContent = state.sessions;
+  document.getElementById('stat-msgs').textContent = state.totalMsgs;
+  document.getElementById('stat-corrections').textContent = state.totalCorrections;
+  document.getElementById('stat-level').textContent = state.level;
+  document.getElementById('level-badge').textContent = state.level;
+
+  const idx = LEVELS.indexOf(state.level);
+  const cur = LEVEL_XP[state.level];
+  const nxt = NEXT_XP[state.level];
+  const pct = Math.min(100, Math.round(((state.xp - cur) / (nxt - cur)) * 100));
+  document.getElementById('level-fill').style.width = pct + '%';
+  document.getElementById('level-detail').textContent =
+    `${LEVEL_NAMES[state.level]} · ${state.xp} XP · ${pct}% até ${LEVELS[idx+1] || '🏆'}`;
+
+  const errors = Object.entries(state.errorMap).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const el = document.getElementById('error-list');
+  if (errors.length) {
+    el.innerHTML = errors.map(([k,v]) =>
+      `<div class="error-item"><span>${k}</span><span class="error-count">${v}x</span></div>`
+    ).join('');
+  } else {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px;">Nenhum erro registrado ainda.</div>';
+  }
+}
+
+// ── TOAST ─────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ── PWA ───────────────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
