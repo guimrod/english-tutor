@@ -735,6 +735,9 @@ let silenceTimer = null;
 let accumulatedTranscript = '';
 const SILENCE_TIMEOUT = 5000; // 5 seconds
 
+let micRetryCount = 0;
+const MAX_MIC_RETRIES = 2;
+
 function toggleMic() {
   if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
     showToast('Use Chrome para reconhecimento de voz'); return;
@@ -747,6 +750,15 @@ function toggleMic() {
     finishRecording();
     return;
   }
+  // Stop any tutor speech before starting to listen (avoid echo/feedback)
+  if (window.speechSynthesis?.speaking) {
+    window.speechSynthesis.cancel();
+  }
+  micRetryCount = 0;
+  startRecognition();
+}
+
+function startRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SR();
   recognition.lang = 'en-US';
@@ -770,6 +782,7 @@ function toggleMic() {
     if (finalText) sendMessage(finalText);
   };
   recognition.onresult = e => {
+    micRetryCount = 0; // reset retry counter on successful result
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const t = e.results[i][0].transcript;
@@ -781,19 +794,30 @@ function toggleMic() {
     resetSilenceTimer();
   };
   recognition.onerror = (e) => {
+    clearTimeout(silenceTimer);
+    if (e.error === 'network' && micRetryCount < MAX_MIC_RETRIES) {
+      micRetryCount++;
+      setTimeout(() => { if (!isRecording) startRecognition(); }, 500);
+      return;
+    }
     isRecording = false;
     document.getElementById('mic-btn').classList.remove('recording');
     document.getElementById('mic-btn').textContent = '🎤';
-    clearTimeout(silenceTimer);
     if (e.error === 'not-allowed' || e.error === 'permission-denied') {
       showToast('🎤 Permissão de microfone negada — verifique nas configurações do navegador');
     } else if (e.error === 'no-speech') {
       showToast('Nenhuma fala detectada');
+    } else if (e.error === 'network') {
+      showToast('🎤 Erro de rede no microfone — tente de novo');
     } else if (e.error !== 'aborted') {
       showToast(`Erro no microfone: ${e.error}`);
     }
   };
-  recognition.start();
+  try {
+    recognition.start();
+  } catch {
+    isRecording = false;
+  }
 }
 
 function resetSilenceTimer() {
@@ -821,7 +845,7 @@ function toggleTTS() {
   ttsEnabled = !ttsEnabled;
   saveTTS();
   updateTTSIcon();
-  showToast(ttsEnabled ? '🔊 Voz do tutor ativada' : '🔇 Voz desativada');
+  showToast(ttsEnabled ? '🔊 Voz ativada — use fones para evitar eco no mic' : '🔇 Voz desativada');
 }
 
 function updateTTSIcon() {
