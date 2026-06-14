@@ -213,11 +213,11 @@
   }
 
   /* profile panel */
-  #profile-panel {
+  #profile-panel, #summary-panel {
     position: fixed; inset: 0; background: rgba(0,0,0,0.7);
     z-index: 100; display: none; align-items: flex-end;
   }
-  #profile-panel.open { display: flex; }
+  #profile-panel.open, #summary-panel.open { display: flex; }
   .profile-sheet {
     width: 100%; background: var(--surface); border-radius: 20px 20px 0 0;
     padding: 24px 20px; padding-bottom: max(24px, env(safe-area-inset-bottom));
@@ -280,7 +280,7 @@
 <div id="chat" class="screen">
   <div class="chat-header">
     <div class="header-left">
-      <div class="header-title">English Tutor</div>
+      <div class="header-title" id="header-title">English Tutor</div>
       <div class="header-mode" id="mode-label">Conversação livre</div>
     </div>
     <div class="header-right">
@@ -288,6 +288,7 @@
       <button class="icon-btn" onclick="toggleListenMode()" id="listen-toggle" title="Modo escuta">👁️</button>
       <button class="icon-btn" onclick="toggleTTS()" id="tts-toggle" title="Voz do tutor">🔇</button>
       <button class="icon-btn" onclick="openProfile()" title="Perfil">📊</button>
+      <button class="icon-btn" onclick="endSession()" title="Encerrar sessão">🏁</button>
     </div>
   </div>
   <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
@@ -328,6 +329,27 @@
   </div>
 </div>
 
+<!-- ── SESSION SUMMARY PANEL ── -->
+<div id="summary-panel" onclick="closeSummary(event)">
+  <div class="profile-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">📋 Resumo da Sessão</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-val" id="sum-exchanges">0</div><div class="stat-lbl">trocas</div></div>
+      <div class="stat-card"><div class="stat-val" id="sum-newvocab">0</div><div class="stat-lbl">palavras novas</div></div>
+      <div class="stat-card"><div class="stat-val" id="sum-errors">0</div><div class="stat-lbl">correções</div></div>
+      <div class="stat-card"><div class="stat-val" id="sum-xp">+0</div><div class="stat-lbl">XP ganho</div></div>
+    </div>
+    <div class="section-label">Temas conversados</div>
+    <div id="sum-topics" style="font-size:13px; color:var(--text); margin-bottom:16px;">—</div>
+    <div class="section-label">Palavras/expressões novas</div>
+    <div id="sum-vocab-list" style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;"></div>
+    <div class="section-label">Frase para levar</div>
+    <div id="sum-takeaway" style="font-size:14px; color:var(--accent2); background:rgba(6,182,212,0.07); border:1px solid rgba(6,182,212,0.18); border-radius:10px; padding:11px 14px; margin-bottom:16px;">—</div>
+    <button class="btn-primary" onclick="closeSummary(null)" style="margin-top:4px;">Fechar</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -337,6 +359,22 @@ const LEVEL_NAMES = { A2:'Básico', B1:'Intermediário', B2:'Intermediário avan
 const LEVEL_XP = { A2:0, B1:200, B2:500, C1:900, C2:1400 };
 const NEXT_XP  = { A2:200, B1:500, B2:900, C1:1400, C2:9999 };
 
+// CEFR skill checklist — key grammar/vocab competencies expected per level.
+// Used for checkpoint gating before level promotion.
+const CEFR_SKILLS = {
+  A2: ['past-simple', 'past-continuous', 'comparatives-superlatives', 'modals-can-must-should', 'quantifiers-much-many', 'future-going-to-will'],
+  B1: ['present-perfect', 'past-perfect', 'first-conditional', 'second-conditional', 'reported-speech', 'gerund-infinitive'],
+  B2: ['third-conditional', 'passive-voice', 'modals-speculation', 'narrative-tenses', 'relative-clauses', 'phrasal-verbs-advanced'],
+  C1: ['inversion-emphasis', 'mixed-conditionals', 'cleft-sentences', 'advanced-idioms', 'subjunctive', 'nuanced-modality'],
+};
+
+// Tutor personas — vary voice/accent and conversational style
+const PERSONAS = [
+  { id: 'mike', name: 'Mike', desc: 'a laid-back guy from Texas, casual, lots of slang and contractions', lang: 'en-US' },
+  { id: 'sophie', name: 'Sophie', desc: 'a warm, articulate woman from London, slightly more formal British English', lang: 'en-GB' },
+  { id: 'jay', name: 'Jay', desc: 'an energetic Australian, very informal, uses Aussie slang', lang: 'en-AU' },
+];
+
 let state = {
   apiKey: '', userName: '',
   level: 'A2', xp: 0,
@@ -344,6 +382,10 @@ let state = {
   errorMap: {},         // { "pattern": count }
   reviewQueue: [],      // [{ pattern, nextReview: timestamp }]
   coveredTopics: [],
+  coveredSkills: [],    // CEFR skill tags demonstrated successfully
+  vocabBank: [],        // [{ word, addedAt, nextReview }]
+  pendingCheckpoint: false, // true when XP threshold reached but skills not covered
+  personaId: null,      // current persona id, null = rotate/random
   lastSession: null,
 };
 
@@ -354,6 +396,7 @@ let listenMode = false;
 let isLoading = false;
 let recognition = null;
 let isRecording = false;
+let sessionSnapshot = null; // state values at session start, for summary delta
 
 // ── STORAGE ───────────────────────────────────────────────────────────────
 function saveState() { localStorage.setItem('et_state', JSON.stringify(state)); }
@@ -398,6 +441,14 @@ function startApp() {
 }
 
 // ── CHAT INIT ─────────────────────────────────────────────────────────────
+function getCurrentPersona() {
+  if (state.personaId) {
+    return PERSONAS.find(p => p.id === state.personaId) || PERSONAS[0];
+  }
+  // Pick a persona based on session number, rotating through the list
+  return PERSONAS[state.sessions % PERSONAS.length];
+}
+
 function buildSystemPrompt() {
   const errSummary = Object.entries(state.errorMap)
     .sort((a,b) => b[1]-a[1]).slice(0,5)
@@ -407,13 +458,31 @@ function buildSystemPrompt() {
     .filter(r => Date.now() >= r.nextReview)
     .map(r => r.pattern).slice(0,3);
 
+  const vocabDue = state.vocabBank
+    .filter(v => Date.now() >= v.nextReview)
+    .map(v => v.word).slice(0,3);
+
+  const persona = getCurrentPersona();
+
+  // CEFR checkpoint: skills expected at current level vs demonstrated
+  const expectedSkills = CEFR_SKILLS[state.level] || [];
+  const missingSkills = expectedSkills.filter(s => !state.coveredSkills.includes(s));
+  const nextLevelReached = state.xp >= LEVEL_XP[LEVELS[LEVELS.indexOf(state.level) + 1]];
+  const checkpointActive = nextLevelReached && missingSkills.length > 0;
+
   return `You are an immersive English conversation tutor for a Brazilian adult (intermediate level, current CEFR: ${state.level}).
 Your student's name is ${state.userName}. They have had ${state.sessions} sessions with you.
+
+YOUR PERSONA: You are ${persona.name}, ${persona.desc}. Stay in character — your vocabulary, slang, and tone should reflect this persona consistently throughout the conversation.
 
 CORE MISSION: Help them sound like a native speaker — real spoken English, contractions, linking sounds, phrasal verbs, colloquialisms, the kind of English heard in movies and from native speakers. Push them beyond textbook English.
 ${state.totalMsgs < 6 ? `
 LEVEL ASSESSMENT (active — student is new, fewer than 6 exchanges so far):
 Pay close attention to their actual English level based on vocabulary range, grammar accuracy, sentence complexity, and fluency — NOT just effort. If their real level is clearly higher or lower than the current "${state.level}", use the LEVEL field in the hidden metadata (see XP SYSTEM below) to correct it directly. Don't wait for gradual XP — jump to the level that matches what you're observing. After 6 exchanges, this assessment window closes and leveling follows the normal XP progression.` : ''}
+${checkpointActive ? `
+CHECKPOINT ACTIVE — IMPORTANT:
+The student has enough XP to advance from ${state.level} to the next level, but hasn't yet demonstrated these expected skills: ${missingSkills.join(', ')}.
+Your NEXT message must CLEARLY and TRANSPARENTLY tell the student you're going to test something specific before they level up — e.g. "Hey, before we move on to the next level, let's check something specific: [briefly describe what you'll test]." Then propose a short exercise/scenario that would naturally elicit one of these missing skills (e.g. for "second-conditional", ask "what would you do if you won the lottery?"). Use the SKILLCHECK field in the hidden metadata to report which skill tag you're testing this turn.` : ''}
 
 YOUR BEHAVIOR:
 - YOU always initiate topics and drive the conversation forward. Never ask "what do you want to talk about?"
@@ -438,7 +507,8 @@ FLUENCY NOTE (optional, only when there's something concrete and useful to point
 If relevant, add at end: 🗣️ [brief, SPECIFIC observation about their sentence structure, flow, vocabulary choice, or naturalness — in Portuguese, 1 line]
 This must reference something concrete from what they actually said. Generic encouragement ("you're doing great", "you seem comfortable") is NOT a fluency note — OMIT entirely in that case.
 
-SPACED REVIEW: These patterns need revisiting today (weave them in naturally): ${reviewDue.length ? reviewDue.join(', ') : 'none'}
+SPACED REVIEW: These error patterns need revisiting today (weave them in naturally): ${reviewDue.length ? reviewDue.join(', ') : 'none'}
+VOCAB REVIEW: These previously-taught words/expressions are due for review — try to naturally use or elicit them today: ${vocabDue.length ? vocabDue.join(', ') : 'none'}
 
 STUDENT PROFILE:
 - Level: ${state.level} (${LEVEL_NAMES[state.level]})  
@@ -446,10 +516,11 @@ STUDENT PROFILE:
 - Sessions: ${state.sessions}
 - Top errors to watch: ${errSummary}
 - Topics already covered: ${state.coveredTopics.slice(-10).join(', ') || 'none yet'}
+- CEFR skills already demonstrated at current level: ${state.coveredSkills.filter(s => expectedSkills.includes(s)).join(', ') || 'none yet'}
 
 XP SYSTEM (internal — do not mention to student):
 At the end of each of your messages, append hidden metadata on the very last line in this exact format with no spaces:
-|||XP:N|ERRORS:tag1,tag2|TOPIC:topicname|LEVEL:X|||
+|||XP:N|ERRORS:tag1,tag2|TOPIC:topicname|LEVEL:X|SKILL:tag|VOCAB:word1,word2|||
 
 XP scoring — based on QUALITY of this turn, not just participation:
 - 10 = correct response, no correction needed
@@ -461,6 +532,10 @@ ERRORS = comma-separated short tags for errors found this turn (or NONE). Use co
 
 LEVEL = the student's CEFR level (A2/B1/B2/C1/C2) as you currently assess it. ${state.totalMsgs < 6 ? 'Since this is an early session, actively reassess and correct this if it differs from the current level.' : `Normally just echo the current level "${state.level}" unless you have strong evidence (sustained over multiple turns) that it should change.`}
 
+SKILL = if the student correctly used (or successfully responded to a test of) one of these CEFR grammar skills this turn, put its exact tag here from this list: ${[...(CEFR_SKILLS[state.level] || [])].join(', ')}. Otherwise NONE.${checkpointActive ? ` IMPORTANT: this turn is a checkpoint test — if the student's response correctly demonstrates one of the missing skills (${missingSkills.join(', ')}), report that exact tag here.` : ''}
+
+VOCAB = comma-separated NEW words or expressions (not seen before in this student's vocab bank) that YOU taught or introduced to the student this turn — only include words you explicitly explained or highlighted as useful, not every word you used. Use NONE if you didn't teach any new vocabulary this turn. Max 2 items.
+
 This line will be parsed and removed before display.`;
 }
 
@@ -469,6 +544,19 @@ async function initChat() {
   updateProfileStats();
   conversation = [];
   currentMode = 'free';
+
+  const persona = getCurrentPersona();
+  const titleEl = document.getElementById('header-title');
+  if (titleEl) titleEl.textContent = `English Tutor — ${persona.name}`;
+
+  // Snapshot for session summary delta
+  sessionSnapshot = {
+    xp: state.xp,
+    totalCorrections: state.totalCorrections,
+    topicsCount: state.coveredTopics.length,
+    vocabCount: state.vocabBank.length,
+    msgs: state.totalMsgs,
+  };
 
   // Opening message from tutor
   showTyping();
@@ -554,7 +642,7 @@ async function callGemini(userText, isInit = false) {
   const finishReason = data.choices?.[0]?.finish_reason;
 
   // Parse hidden metadata
-  const metaMatch = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|LEVEL:([^|]+)\|\|\|/);
+  const metaMatch = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|LEVEL:([^|]+)\|SKILL:([^|]+)\|VOCAB:([^|]+)\|\|\|/);
 
   // If truncated mid-response (no metadata found, hit token limit), trim to last complete sentence
   if (!metaMatch && finishReason === 'length' && text.trim()) {
@@ -562,19 +650,33 @@ async function callGemini(userText, isInit = false) {
     if (lastPunct > 10) text = text.slice(0, lastPunct + 1);
   }
 
-  const metaMatch2 = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|LEVEL:([^|]+)\|\|\|/);
+  const metaMatch2 = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|LEVEL:([^|]+)\|SKILL:([^|]+)\|VOCAB:([^|]+)\|\|\|/);
   if (metaMatch2) {
     const xpGain = parseInt(metaMatch2[1]);
     const errors = metaMatch2[2] !== 'NONE' ? metaMatch2[2].split(',').map(s=>s.trim()).filter(Boolean) : [];
     const topic = metaMatch2[3].trim();
     const reportedLevel = metaMatch2[4].trim().toUpperCase();
-    text = text.replace(/\|\|\|XP:\d+\|ERRORS:[^|]+\|TOPIC:[^|]+\|LEVEL:[^|]+\|\|\|\n?/, '').trim();
+    const skillTag = metaMatch2[5].trim();
+    const vocabWords = metaMatch2[6] !== 'NONE' ? metaMatch2[6].split(',').map(s=>s.trim()).filter(Boolean) : [];
+    text = text.replace(/\|\|\|XP:\d+\|ERRORS:[^|]+\|TOPIC:[^|]+\|LEVEL:[^|]+\|SKILL:[^|]+\|VOCAB:[^|]+\|\|\|\n?/, '').trim();
 
     // Update state
     state.xp += isNaN(xpGain) ? 5 : xpGain;
     errors.forEach(e => { state.errorMap[e] = (state.errorMap[e] || 0) + 1; });
     if (errors.length) state.totalCorrections += errors.length;
     if (topic && !state.coveredTopics.includes(topic)) state.coveredTopics.push(topic);
+
+    // Track demonstrated CEFR skill
+    if (skillTag && skillTag !== 'NONE' && !state.coveredSkills.includes(skillTag)) {
+      state.coveredSkills.push(skillTag);
+    }
+
+    // Track new vocabulary for spaced review
+    vocabWords.forEach(w => {
+      if (!state.vocabBank.find(v => v.word.toLowerCase() === w.toLowerCase())) {
+        state.vocabBank.push({ word: w, addedAt: Date.now(), nextReview: Date.now() + 86400000 });
+      }
+    });
 
     // Spaced review: schedule errors for future review
     errors.forEach(e => {
@@ -584,6 +686,15 @@ async function callGemini(userText, isInit = false) {
       } else {
         // Double the interval (spaced repetition)
         const interval = existing.nextReview - Date.now();
+        existing.nextReview = Date.now() + Math.min(interval * 2, 7 * 86400000);
+      }
+    });
+
+    // Spaced review: update vocab review intervals if the word was used/elicited again
+    vocabWords.forEach(w => {
+      const existing = state.vocabBank.find(v => v.word.toLowerCase() === w.toLowerCase());
+      if (existing && existing.addedAt < Date.now() - 1000) {
+        const interval = existing.nextReview - existing.addedAt;
         existing.nextReview = Date.now() + Math.min(interval * 2, 7 * 86400000);
       }
     });
@@ -617,8 +728,13 @@ function checkLevelUp() {
   if (idx < LEVELS.length - 1) {
     const next = LEVELS[idx + 1];
     if (state.xp >= LEVEL_XP[next]) {
-      state.level = next;
-      showToast(`🎉 Level up! Now ${state.level} — ${LEVEL_NAMES[state.level]}`);
+      const expectedSkills = CEFR_SKILLS[state.level] || [];
+      const missingSkills = expectedSkills.filter(s => !state.coveredSkills.includes(s));
+      if (missingSkills.length === 0) {
+        state.level = next;
+        showToast(`🎉 Level up! Now ${state.level} — ${LEVEL_NAMES[state.level]}`);
+      }
+      // else: checkpoint pending — system prompt will trigger a skill check on next turn
     }
   }
 }
@@ -900,7 +1016,12 @@ function speak(text) {
   if (!window.speechSynthesis) return;
   window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'en-US'; u.rate = 0.88;
+  const persona = getCurrentPersona();
+  u.lang = persona.lang; u.rate = 0.88;
+  // Try to find a voice matching the persona's accent
+  const voices = window.speechSynthesis.getVoices();
+  const match = voices.find(v => v.lang === persona.lang) || voices.find(v => v.lang.startsWith(persona.lang.split('-')[0]));
+  if (match) u.voice = match;
   window.speechSynthesis.speak(u);
 }
 
@@ -931,6 +1052,77 @@ function updateListenIcon() {
   if (btn) {
     btn.style.color = listenMode ? 'var(--accent2)' : '';
     btn.style.background = listenMode ? 'rgba(6,182,212,0.15)' : '';
+  }
+}
+
+// ── SESSION SUMMARY ───────────────────────────────────────────────────────
+async function endSession() {
+  if (!sessionSnapshot) { showToast('Sessão ainda não iniciada'); return; }
+
+  const exchanges = state.totalMsgs - sessionSnapshot.msgs;
+  const xpGained = state.xp - sessionSnapshot.xp;
+  const newCorrections = state.totalCorrections - sessionSnapshot.totalCorrections;
+  const newTopics = state.coveredTopics.slice(sessionSnapshot.topicsCount);
+  const newVocab = state.vocabBank.slice(sessionSnapshot.vocabCount);
+
+  document.getElementById('sum-exchanges').textContent = exchanges;
+  document.getElementById('sum-newvocab').textContent = newVocab.length;
+  document.getElementById('sum-errors').textContent = newCorrections;
+  document.getElementById('sum-xp').textContent = `+${xpGained}`;
+  document.getElementById('sum-topics').textContent = newTopics.length ? newTopics.join(', ') : 'Nenhum tema novo';
+
+  const vocabListEl = document.getElementById('sum-vocab-list');
+  if (newVocab.length) {
+    vocabListEl.innerHTML = newVocab.map(v =>
+      `<div class="error-item"><span>${v.word}</span></div>`
+    ).join('');
+  } else {
+    vocabListEl.innerHTML = '<div style="color:var(--muted);font-size:13px;">Nenhuma palavra nova nesta sessão.</div>';
+  }
+
+  document.getElementById('sum-takeaway').textContent = '⏳ Gerando...';
+  document.getElementById('summary-panel').classList.add('open');
+
+  // Ask the model for a short takeaway phrase based on the conversation
+  if (exchanges > 0) {
+    try {
+      const persona = getCurrentPersona();
+      const body = {
+        model: GROQ_MODEL,
+        messages: [
+          { role: 'system', content: `You are ${persona.name}, the English tutor. Based on this conversation, write ONE short, memorable English sentence or expression (max 12 words) that the student should remember from today — ideally something they struggled with or that's useful. Reply with ONLY the sentence, no quotes, no explanation, no Portuguese.` },
+          ...conversation.slice(-10)
+        ],
+        temperature: 0.7,
+        max_tokens: 60
+      };
+      const res = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.apiKey}` },
+        body: JSON.stringify(body)
+      }, 15000);
+      if (res.ok) {
+        const data = await res.json();
+        const takeaway = data.choices?.[0]?.message?.content?.trim() || '—';
+        document.getElementById('sum-takeaway').textContent = takeaway;
+      } else {
+        document.getElementById('sum-takeaway').textContent = '—';
+      }
+    } catch {
+      document.getElementById('sum-takeaway').textContent = '—';
+    }
+  } else {
+    document.getElementById('sum-takeaway').textContent = 'Converse um pouco para receber uma frase!';
+  }
+}
+
+function closeSummary(e) {
+  if (!e || e.target === document.getElementById('summary-panel')) {
+    document.getElementById('summary-panel').classList.remove('open');
+    sessionSnapshot = { ...sessionSnapshot,
+      xp: state.xp, totalCorrections: state.totalCorrections,
+      topicsCount: state.coveredTopics.length, vocabCount: state.vocabBank.length,
+      msgs: state.totalMsgs };
   }
 }
 
