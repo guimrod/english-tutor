@@ -395,14 +395,16 @@ MODES you can enter (announce with a short chip label):
 - [Decode the Native] — throw a phrase as natives actually say it: "Whaddya think?", "I coulda sworn", "Lemme know". Ask them to decode and use it.
 - Switch modes naturally or when student requests.
 
-CORRECTIONS (every response where there's something to fix):
+CORRECTIONS:
 1. First, respond naturally — woven into your reply, use the correct form of what they said wrong, without highlighting it
-2. At the END of your message, add a correction note in this exact format:
+2. If there's something specific worth correcting, at the END of your message add a note in this exact format:
 💡 [what they said] → [how a native says it] — [one-line explanation in Portuguese]
 Only correct 1-2 things max per message. Pick the most important.
+If there's nothing meaningful to correct, OMIT this entirely — do not write "none" or similar.
 
-FLUENCY NOTE (when relevant, not every message):
-Add at end: 🗣️ [brief observation about their sentence structure, flow, or naturalness — in Portuguese, 1 line]
+FLUENCY NOTE (optional, only when there's something concrete and useful to point out):
+If relevant, add at end: 🗣️ [brief, SPECIFIC observation about their sentence structure, flow, vocabulary choice, or naturalness — in Portuguese, 1 line]
+This must reference something concrete from what they actually said. Generic encouragement ("you're doing great", "you seem comfortable") is NOT a fluency note — OMIT entirely in that case.
 
 SPACED REVIEW: These patterns need revisiting today (weave them in naturally): ${reviewDue.length ? reviewDue.join(', ') : 'none'}
 
@@ -600,6 +602,10 @@ function parseMessage(text) {
   if (corrMatch) { corr = corrMatch[1].trim(); main = main.replace(corrMatch[1], '').trim(); }
   if (fluMatch)  { flu  = fluMatch[0].trim();  main = main.replace(fluMatch[0], '').trim(); }
 
+  // Discard notes that are empty or just say "none"
+  if (corr && /^💡\s*\(?(none|n\/a|nenhum)\)?\.?$/i.test(corr)) corr = null;
+  if (flu && /^🗣️\s*\(?(none|n\/a|nenhum)\)?\.?$/i.test(flu)) flu = null;
+
   // Strip residual markdown bold and stray numbered-step artifacts from leaked reasoning
   main = main.replace(/\*\*/g, '');
   main = main.replace(/^\d+\.\s*\)?\s*/gm, '');
@@ -733,6 +739,10 @@ function toggleMic() {
   if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
     showToast('Use Chrome para reconhecimento de voz'); return;
   }
+  if (!window.isSecureContext) {
+    showToast('🎤 Microfone requer HTTPS — abra pela URL do site, não localmente');
+    return;
+  }
   if (isRecording) {
     finishRecording();
     return;
@@ -770,11 +780,18 @@ function toggleMic() {
     document.getElementById('text-input').value = (accumulatedTranscript + interim).trim();
     resetSilenceTimer();
   };
-  recognition.onerror = () => {
+  recognition.onerror = (e) => {
     isRecording = false;
     document.getElementById('mic-btn').classList.remove('recording');
     document.getElementById('mic-btn').textContent = '🎤';
     clearTimeout(silenceTimer);
+    if (e.error === 'not-allowed' || e.error === 'permission-denied') {
+      showToast('🎤 Permissão de microfone negada — verifique nas configurações do navegador');
+    } else if (e.error === 'no-speech') {
+      showToast('Nenhuma fala detectada');
+    } else if (e.error !== 'aborted') {
+      showToast(`Erro no microfone: ${e.error}`);
+    }
   };
   recognition.start();
 }
