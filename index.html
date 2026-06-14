@@ -519,8 +519,9 @@ STUDENT PROFILE:
 - CEFR skills already demonstrated at current level: ${state.coveredSkills.filter(s => expectedSkills.includes(s)).join(', ') || 'none yet'}
 
 XP SYSTEM (internal — do not mention to student):
-At the end of each of your messages, append hidden metadata on the very last line in this exact format with no spaces:
-|||XP:N|ERRORS:tag1,tag2|TOPIC:topicname|LEVEL:X|SKILL:tag|VOCAB:word1,word2|||
+At the end of each of your messages, append hidden metadata on the very last line, with NO spaces anywhere in this line, in this exact format:
+|||XP:10|ERRORS:NONE|TOPIC:movies|LEVEL:A2|SKILL:NONE|VOCAB:NONE|||
+(This is just an example — replace each value with the real data for this turn. XP must be an actual number like 0, 3, 10, or 15 — never the letter "N" or any placeholder text. Do not add spaces after the colons or pipes.)
 
 XP scoring — based on QUALITY of this turn, not just participation:
 - 10 = correct response, no correction needed
@@ -641,8 +642,8 @@ async function callGemini(userText, isInit = false) {
   let text = data.choices?.[0]?.message?.content || '';
   const finishReason = data.choices?.[0]?.finish_reason;
 
-  // Parse hidden metadata
-  const metaMatch = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|LEVEL:([^|]+)\|SKILL:([^|]+)\|VOCAB:([^|]+)\|\|\|/);
+  // Parse hidden metadata (tolerant to extra spaces and non-numeric XP placeholders)
+  const metaMatch = text.match(/\|\|\|\s*XP:\s*([^\s|]+)\s*\|\s*ERRORS:\s*([^|]+)\|\s*TOPIC:\s*([^|]+)\|\s*LEVEL:\s*([^|]+)\|\s*SKILL:\s*([^|]+)\|\s*VOCAB:\s*([^|]+)\|\|\|/);
 
   // If truncated mid-response (no metadata found, hit token limit), trim to last complete sentence
   if (!metaMatch && finishReason === 'length' && text.trim()) {
@@ -650,15 +651,16 @@ async function callGemini(userText, isInit = false) {
     if (lastPunct > 10) text = text.slice(0, lastPunct + 1);
   }
 
-  const metaMatch2 = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|LEVEL:([^|]+)\|SKILL:([^|]+)\|VOCAB:([^|]+)\|\|\|/);
+  const metaMatch2 = text.match(/\|\|\|\s*XP:\s*([^\s|]+)\s*\|\s*ERRORS:\s*([^|]+)\|\s*TOPIC:\s*([^|]+)\|\s*LEVEL:\s*([^|]+)\|\s*SKILL:\s*([^|]+)\|\s*VOCAB:\s*([^|]+)\|\|\|/);
   if (metaMatch2) {
-    const xpGain = parseInt(metaMatch2[1]);
-    const errors = metaMatch2[2] !== 'NONE' ? metaMatch2[2].split(',').map(s=>s.trim()).filter(Boolean) : [];
+    const xpRaw = metaMatch2[1].trim();
+    const xpGain = parseInt(xpRaw);
+    const errors = metaMatch2[2].trim() !== 'NONE' ? metaMatch2[2].split(',').map(s=>s.trim()).filter(Boolean) : [];
     const topic = metaMatch2[3].trim();
     const reportedLevel = metaMatch2[4].trim().toUpperCase();
     const skillTag = metaMatch2[5].trim();
-    const vocabWords = metaMatch2[6] !== 'NONE' ? metaMatch2[6].split(',').map(s=>s.trim()).filter(Boolean) : [];
-    text = text.replace(/\|\|\|XP:\d+\|ERRORS:[^|]+\|TOPIC:[^|]+\|LEVEL:[^|]+\|SKILL:[^|]+\|VOCAB:[^|]+\|\|\|\n?/, '').trim();
+    const vocabWords = metaMatch2[6].trim() !== 'NONE' ? metaMatch2[6].split(',').map(s=>s.trim()).filter(Boolean) : [];
+    text = text.replace(/\|\|\|\s*XP:\s*[^\s|]+\s*\|\s*ERRORS:\s*[^|]+\|\s*TOPIC:\s*[^|]+\|\s*LEVEL:\s*[^|]+\|\s*SKILL:\s*[^|]+\|\s*VOCAB:\s*[^|]+\|\|\|\n?/, '').trim();
 
     // Update state
     state.xp += isNaN(xpGain) ? 5 : xpGain;
