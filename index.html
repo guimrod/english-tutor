@@ -425,13 +425,16 @@ async function initChat() {
   // Opening message from tutor
   showTyping();
   try {
-    const opening = await callGemini("START_SESSION", true);
+    const opening = await Promise.race([
+      callGemini("START_SESSION", true),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_SAFETY')), 30000))
+    ]);
     removeTyping();
     addMessage('tutor', opening);
   } catch (e) {
     removeTyping();
     const isQuota = e.message.toLowerCase().includes('quota') || e.message.includes('429');
-    const isTimeout = e.name === 'AbortError';
+    const isTimeout = e.name === 'AbortError' || e.message === 'TIMEOUT_SAFETY';
     addMessage('tutor', isQuota
       ? '⏳ Limite de requisições atingido. Aguarde 1 minuto e toque em qualquer botão para tentar de novo.'
       : isTimeout
@@ -449,7 +452,7 @@ async function detectModel() {
   if (stored) { cachedModel = stored; return stored; }
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${state.apiKey}`);
+    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models?key=${state.apiKey}`, {}, 15000);
     const data = await res.json();
     const names = (data.models || [])
       .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
