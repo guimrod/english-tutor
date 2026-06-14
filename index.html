@@ -1025,42 +1025,53 @@ function finishRecording() {
 
 // ── TTS ───────────────────────────────────────────────────────────────────
 function speak(text) {
-  if (!window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  const persona = getCurrentPersona();
-  u.lang = persona.lang; u.rate = 0.88;
-  // Try to find a voice matching the persona's accent
-  const voices = window.speechSynthesis.getVoices();
-  const match = voices.find(v => v.lang === persona.lang) || voices.find(v => v.lang.startsWith(persona.lang.split('-')[0]));
-  if (match) u.voice = match;
+  if (!window.speechSynthesis || !text) return;
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const persona = getCurrentPersona();
+    u.lang = persona.lang || 'en-US';
+    u.rate = 0.88;
 
-  // Pause mic while the tutor is speaking to avoid echo capture
-  let micWasRecording = false;
-  let preservedTranscript = '';
-  u.onstart = () => {
-    if (isRecording && recognition) {
-      micWasRecording = true;
-      preservedTranscript = accumulatedTranscript;
-      clearTimeout(silenceTimer);
-      recognition._suppressEnd = true;
-      try { recognition.abort(); } catch {}
-    }
-  };
-  u.onend = u.onerror = () => {
-    if (micWasRecording) {
-      micWasRecording = false;
-      setTimeout(() => {
-        if (!isRecording) {
-          startRecognition();
-          accumulatedTranscript = preservedTranscript;
-          document.getElementById('text-input').value = preservedTranscript.trim();
-        }
-      }, 300);
-    }
-  };
+    // Try to find a voice matching the persona's accent (best-effort, never blocks)
+    try {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices && voices.length) {
+        const match = voices.find(v => v.lang === persona.lang) || voices.find(v => v.lang && v.lang.startsWith(persona.lang.split('-')[0]));
+        if (match) u.voice = match;
+      }
+    } catch {}
 
-  window.speechSynthesis.speak(u);
+    // Pause mic while the tutor is speaking to avoid echo capture
+    let micWasRecording = false;
+    let preservedTranscript = '';
+    u.onstart = () => {
+      if (isRecording && recognition) {
+        micWasRecording = true;
+        preservedTranscript = accumulatedTranscript;
+        clearTimeout(silenceTimer);
+        recognition._suppressEnd = true;
+        try { recognition.abort(); } catch {}
+      }
+    };
+    u.onend = u.onerror = () => {
+      if (micWasRecording) {
+        micWasRecording = false;
+        setTimeout(() => {
+          if (!isRecording) {
+            startRecognition();
+            accumulatedTranscript = preservedTranscript;
+            document.getElementById('text-input').value = preservedTranscript.trim();
+          }
+        }, 300);
+      }
+    };
+
+    // Some browsers need a tick after cancel() before speak() works reliably
+    setTimeout(() => {
+      try { window.speechSynthesis.speak(u); } catch {}
+    }, 50);
+  } catch {}
 }
 
 function toggleTTS() {
