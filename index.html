@@ -240,9 +240,9 @@
   <div class="logo-sub">Conversação real com um tutor que te conduz — e responde quando você manda.</div>
   <div class="setup-form">
     <div>
-      <div class="field-label">Sua chave do Gemini</div>
-      <input class="field-input" id="api-key-input" type="password" placeholder="AIza..."/>
-      <div class="field-hint">Gratuita em <strong>aistudio.google.com</strong> → Get API Key</div>
+      <div class="field-label">Sua chave do Groq</div>
+      <input class="field-input" id="api-key-input" type="password" placeholder="gsk_..."/>
+      <div class="field-hint">Gratuita em <strong>console.groq.com</strong> → API Keys → Create API Key</div>
     </div>
     <div>
       <div class="field-label">Seu nome (opcional)</div>
@@ -341,8 +341,12 @@ function loadTTS() { ttsEnabled = localStorage.getItem('et_tts') === '1'; }
 // ── SETUP ─────────────────────────────────────────────────────────────────
 loadState(); loadTTS();
 
-// Pre-fill if returning user
+// Pre-fill if returning user (skip old Gemini-format keys)
 window.addEventListener('DOMContentLoaded', () => {
+  if (state.apiKey && state.apiKey.startsWith('AIza')) {
+    state.apiKey = '';
+    saveState();
+  }
   if (state.apiKey) {
     document.getElementById('api-key-input').value = state.apiKey;
     document.getElementById('name-input').value = state.userName || '';
@@ -353,7 +357,7 @@ window.addEventListener('DOMContentLoaded', () => {
 function startApp() {
   const key = document.getElementById('api-key-input').value.trim();
   const name = document.getElementById('name-input').value.trim();
-  if (!key) { showToast('Cole sua chave do Gemini'); return; }
+  if (!key) { showToast('Cole sua chave do Groq'); return; }
   state.apiKey = key;
   state.userName = name || 'you';
   state.sessions += 1;
@@ -443,45 +447,6 @@ async function initChat() {
   }
 }
 
-// ── MODEL DETECTION ──────────────────────────────────────────────────────
-let cachedModel = null;
-
-async function detectModel() {
-  if (cachedModel) return cachedModel;
-  const stored = localStorage.getItem('et_model_v2');
-  if (stored) { cachedModel = stored; return stored; }
-
-  try {
-    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models?key=${state.apiKey}`, {}, 15000);
-    const data = await res.json();
-    const names = (data.models || [])
-      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
-      .map(m => m.name.replace('models/', ''));
-
-    // Preference order: 2.0-flash first (fast, no reasoning leakage); avoid newer "thinking" models
-    const preferences = [
-      'gemini-2.0-flash',
-      'gemini-2.0-flash-001',
-      'gemini-1.5-flash-latest',
-      'gemini-1.5-flash',
-      'gemini-2.5-flash',
-      'gemini-flash-latest',
-      'gemini-pro-latest',
-      'gemini-2.5-pro',
-    ];
-    let chosen = preferences.find(p => names.includes(p));
-    if (!chosen) chosen = names.find(n => n.includes('flash')) || names[0];
-    if (!chosen) throw new Error('No models available for this key');
-
-    cachedModel = chosen;
-    localStorage.setItem('et_model_v2', chosen);
-    return chosen;
-  } catch (e) {
-    cachedModel = 'gemini-2.0-flash';
-    return cachedModel;
-  }
-}
-
 // ── FETCH WITH TIMEOUT ────────────────────────────────────────────────────
 async function fetchWithTimeout(url, options, timeoutMs = 25000) {
   const controller = new AbortController();
@@ -493,45 +458,45 @@ async function fetchWithTimeout(url, options, timeoutMs = 25000) {
   }
 }
 
-// ── GEMINI API ─────────────────────────────────────────────────────────────
+// ── GROQ API ───────────────────────────────────────────────────────────────
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
+
 async function callGemini(userText, isInit = false) {
-  if (!isInit) {
-    conversation.push({ role: 'user', parts: [{ text: userText }] });
+  if (isInit) {
+    conversation.push({ role: 'user', content: `START_SESSION: Greet ${state.userName} naturally and start an engaging conversation topic. Remember their level is ${state.level} and they've had ${state.sessions} sessions.` });
+  } else {
+    conversation.push({ role: 'user', content: userText });
   }
 
-  const body = {
-    system_instruction: { parts: [{ text: buildSystemPrompt() }] },
-    contents: isInit
-      ? [{ role: 'user', parts: [{ text: `START_SESSION: Greet ${state.userName} naturally and start an engaging conversation topic. Remember their level is ${state.level} and they've had ${state.sessions} sessions.` }] }]
-      : conversation,
-    generationConfig: {
-      temperature: 0.85,
-      maxOutputTokens: 1024
-    }
-  };
+  const messages = [
+    { role: 'system', content: buildSystemPrompt() },
+    ...conversation
+  ];
 
-  const model = await detectModel();
+  const body = {
+    model: GROQ_MODEL,
+    messages,
+    temperature: 0.85,
+    max_tokens: 1024
+  };
 
   let res, attempts = 0;
   while (attempts < 3) {
     res = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${state.apiKey}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.apiKey}`
+        },
+        body: JSON.stringify(body)
+      }
     );
     if (res.status === 429) {
       attempts++;
-      if (attempts < 3) await new Promise(r => setTimeout(r, 35000));
+      if (attempts < 3) await new Promise(r => setTimeout(r, 8000));
       else { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || 'Quota exceeded'); }
-    } else if (res.status === 404 && attempts === 0) {
-      // Model name invalid — clear cache and retry once with fresh detection
-      localStorage.removeItem('et_model_v2');
-      cachedModel = null;
-      const fresh = await detectModel();
-      res = await fetchWithTimeout(
-        `https://generativelanguage.googleapis.com/v1beta/models/${fresh}:generateContent?key=${state.apiKey}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-      );
-      break;
     } else break;
   }
 
@@ -541,14 +506,14 @@ async function callGemini(userText, isInit = false) {
   }
 
   const data = await res.json();
-  let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const finishReason = data.candidates?.[0]?.finishReason;
+  let text = data.choices?.[0]?.message?.content || '';
+  const finishReason = data.choices?.[0]?.finish_reason;
 
   // Parse hidden metadata
   const metaMatch = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|\|\|/);
 
   // If truncated mid-response (no metadata found, hit token limit), trim to last complete sentence
-  if (!metaMatch && finishReason === 'MAX_TOKENS' && text.trim()) {
+  if (!metaMatch && finishReason === 'length' && text.trim()) {
     const lastPunct = Math.max(text.lastIndexOf('.'), text.lastIndexOf('!'), text.lastIndexOf('?'));
     if (lastPunct > 10) text = text.slice(0, lastPunct + 1);
   }
@@ -585,9 +550,7 @@ async function callGemini(userText, isInit = false) {
     updateProfileStats();
   }
 
-  if (!isInit) {
-    conversation.push({ role: 'model', parts: [{ text }] });
-  }
+  conversation.push({ role: 'assistant', content: text });
 
   return text;
 }
