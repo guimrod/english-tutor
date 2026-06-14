@@ -411,6 +411,9 @@ function buildSystemPrompt() {
 Your student's name is ${state.userName}. They have had ${state.sessions} sessions with you.
 
 CORE MISSION: Help them sound like a native speaker — real spoken English, contractions, linking sounds, phrasal verbs, colloquialisms, the kind of English heard in movies and from native speakers. Push them beyond textbook English.
+${state.totalMsgs < 6 ? `
+LEVEL ASSESSMENT (active — student is new, fewer than 6 exchanges so far):
+Pay close attention to their actual English level based on vocabulary range, grammar accuracy, sentence complexity, and fluency — NOT just effort. If their real level is clearly higher or lower than the current "${state.level}", use the LEVEL field in the hidden metadata (see XP SYSTEM below) to correct it directly. Don't wait for gradual XP — jump to the level that matches what you're observing. After 6 exchanges, this assessment window closes and leveling follows the normal XP progression.` : ''}
 
 YOUR BEHAVIOR:
 - YOU always initiate topics and drive the conversation forward. Never ask "what do you want to talk about?"
@@ -446,8 +449,18 @@ STUDENT PROFILE:
 
 XP SYSTEM (internal — do not mention to student):
 At the end of each of your messages, append hidden metadata on the very last line in this exact format with no spaces:
-|||XP:N|ERRORS:tag1,tag2|TOPIC:topicname|||
-Where N = XP to award this turn (5=basic response, 10=good, 15=excellent/complex), ERRORS = comma-separated short tags for errors found (or NONE), TOPIC = one-word topic of this exchange.
+|||XP:N|ERRORS:tag1,tag2|TOPIC:topicname|LEVEL:X|||
+
+XP scoring — based on QUALITY of this turn, not just participation:
+- 10 = correct response, no correction needed
+- 3 = correct response, but contains an error NOT seen before (first occurrence of this error pattern)
+- 0 = response contains an error that's a REPEAT of something in "Top errors to watch" below — they haven't internalized it yet
+- 15 = spontaneously used a complex structure, idiom, or phrasal verb correctly without being prompted to
+
+ERRORS = comma-separated short tags for errors found this turn (or NONE). Use consistent short tags (e.g. "verb-tense", "preposition", "false-cognate") so repeats can be detected.
+
+LEVEL = the student's CEFR level (A2/B1/B2/C1/C2) as you currently assess it. ${state.totalMsgs < 6 ? 'Since this is an early session, actively reassess and correct this if it differs from the current level.' : `Normally just echo the current level "${state.level}" unless you have strong evidence (sustained over multiple turns) that it should change.`}
+
 This line will be parsed and removed before display.`;
 }
 
@@ -541,7 +554,7 @@ async function callGemini(userText, isInit = false) {
   const finishReason = data.choices?.[0]?.finish_reason;
 
   // Parse hidden metadata
-  const metaMatch = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|\|\|/);
+  const metaMatch = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|LEVEL:([^|]+)\|\|\|/);
 
   // If truncated mid-response (no metadata found, hit token limit), trim to last complete sentence
   if (!metaMatch && finishReason === 'length' && text.trim()) {
@@ -549,15 +562,16 @@ async function callGemini(userText, isInit = false) {
     if (lastPunct > 10) text = text.slice(0, lastPunct + 1);
   }
 
-  const metaMatch2 = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|\|\|/);
+  const metaMatch2 = text.match(/\|\|\|XP:(\d+)\|ERRORS:([^|]+)\|TOPIC:([^|]+)\|LEVEL:([^|]+)\|\|\|/);
   if (metaMatch2) {
-    const xpGain = parseInt(metaMatch2[1]) || 5;
+    const xpGain = parseInt(metaMatch2[1]);
     const errors = metaMatch2[2] !== 'NONE' ? metaMatch2[2].split(',').map(s=>s.trim()).filter(Boolean) : [];
     const topic = metaMatch2[3].trim();
-    text = text.replace(/\|\|\|XP:\d+\|ERRORS:[^|]+\|TOPIC:[^|]+\|\|\|\n?/, '').trim();
+    const reportedLevel = metaMatch2[4].trim().toUpperCase();
+    text = text.replace(/\|\|\|XP:\d+\|ERRORS:[^|]+\|TOPIC:[^|]+\|LEVEL:[^|]+\|\|\|\n?/, '').trim();
 
     // Update state
-    state.xp += xpGain;
+    state.xp += isNaN(xpGain) ? 5 : xpGain;
     errors.forEach(e => { state.errorMap[e] = (state.errorMap[e] || 0) + 1; });
     if (errors.length) state.totalCorrections += errors.length;
     if (topic && !state.coveredTopics.includes(topic)) state.coveredTopics.push(topic);
@@ -574,7 +588,18 @@ async function callGemini(userText, isInit = false) {
       }
     });
 
-    checkLevelUp();
+    // Direct level override during assessment window, or normal XP-based progression
+    if (LEVELS.includes(reportedLevel) && reportedLevel !== state.level && state.totalMsgs < 6) {
+      const oldLevel = state.level;
+      state.level = reportedLevel;
+      state.xp = LEVEL_XP[reportedLevel];
+      if (oldLevel !== reportedLevel) {
+        showToast(`📊 Nível ajustado para ${reportedLevel} — ${LEVEL_NAMES[reportedLevel]}`);
+      }
+    } else {
+      checkLevelUp();
+    }
+
     state.totalMsgs += 1;
     saveState();
     updateLevelUI();
@@ -683,14 +708,12 @@ function addMessage(role, text) {
       wrap.appendChild(fn);
     }
 
-    // Listen mode: blur all text content, reveal on tap; always auto-play audio
+    // Listen mode: blur only the tutor's spoken text, reveal on tap; corrections stay visible; always auto-play audio
     if (listenMode) {
-      [bubble, ...wrap.querySelectorAll('.correction-note, .fluency-note')].forEach(el => {
-        el.classList.add('hidden-text');
-      });
-      wrap.style.cursor = 'pointer';
-      wrap.addEventListener('click', () => {
-        wrap.querySelectorAll('.hidden-text').forEach(el => el.classList.remove('hidden-text'));
+      bubble.classList.add('hidden-text');
+      bubble.style.cursor = 'pointer';
+      bubble.addEventListener('click', () => {
+        bubble.classList.remove('hidden-text');
       }, { once: true });
       speak(main);
     } else if (ttsEnabled) {
