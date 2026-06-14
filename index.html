@@ -248,7 +248,7 @@
       <div class="field-label">Seu nome (opcional)</div>
       <input class="field-input" id="name-input" type="text" placeholder="ex: Guilherme"/>
     </div>
-    <button class="btn-primary" id="start-btn" onclick="startApp()">Começar →</button>
+    <button class="btn-primary" id="start-btn" onclick="startApp()">Iniciar aula →</button>
   </div>
 </div>
 
@@ -423,8 +423,18 @@ async function initChat() {
   currentMode = 'free';
 
   // Opening message from tutor
-  const opening = await callGemini("START_SESSION", true);
-  addMessage('tutor', opening);
+  showTyping();
+  try {
+    const opening = await callGemini("START_SESSION", true);
+    removeTyping();
+    addMessage('tutor', opening);
+  } catch (e) {
+    removeTyping();
+    const isQuota = e.message.toLowerCase().includes('quota') || e.message.includes('429');
+    addMessage('tutor', isQuota
+      ? '⏳ Limite de requisições atingido. Aguarde 1 minuto e toque em qualquer botão para tentar de novo.'
+      : `⚠️ Erro: ${e.message}`);
+  }
 }
 
 // ── MODEL DETECTION ──────────────────────────────────────────────────────
@@ -714,38 +724,70 @@ function autoResize(el) {
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────
+let silenceTimer = null;
+let accumulatedTranscript = '';
+const SILENCE_TIMEOUT = 5000; // 5 seconds
+
 function toggleMic() {
   if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
     showToast('Use Chrome para reconhecimento de voz'); return;
   }
   if (isRecording) {
-    recognition?.stop(); return;
+    finishRecording();
+    return;
   }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SR();
   recognition.lang = 'en-US';
-  recognition.continuous = false;
-  recognition.interimResults = false;
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  accumulatedTranscript = '';
+
   recognition.onstart = () => {
     isRecording = true;
     document.getElementById('mic-btn').classList.add('recording');
     document.getElementById('mic-btn').textContent = '⏹';
+    resetSilenceTimer();
   };
   recognition.onend = () => {
     isRecording = false;
     document.getElementById('mic-btn').classList.remove('recording');
     document.getElementById('mic-btn').textContent = '🎤';
+    clearTimeout(silenceTimer);
+    const finalText = accumulatedTranscript.trim();
+    accumulatedTranscript = '';
+    if (finalText) sendMessage(finalText);
   };
   recognition.onresult = e => {
-    const t = e.results[0][0].transcript;
-    sendMessage(t);
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) accumulatedTranscript += t + ' ';
+      else interim += t;
+    }
+    // Show live preview in the text input
+    document.getElementById('text-input').value = (accumulatedTranscript + interim).trim();
+    resetSilenceTimer();
   };
   recognition.onerror = () => {
     isRecording = false;
     document.getElementById('mic-btn').classList.remove('recording');
     document.getElementById('mic-btn').textContent = '🎤';
+    clearTimeout(silenceTimer);
   };
   recognition.start();
+}
+
+function resetSilenceTimer() {
+  clearTimeout(silenceTimer);
+  silenceTimer = setTimeout(() => {
+    if (isRecording) recognition?.stop();
+  }, SILENCE_TIMEOUT);
+}
+
+function finishRecording() {
+  clearTimeout(silenceTimer);
+  recognition?.stop();
 }
 
 // ── TTS ───────────────────────────────────────────────────────────────────
