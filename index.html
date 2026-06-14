@@ -427,6 +427,44 @@ async function initChat() {
   addMessage('tutor', opening);
 }
 
+// ── MODEL DETECTION ──────────────────────────────────────────────────────
+let cachedModel = null;
+
+async function detectModel() {
+  if (cachedModel) return cachedModel;
+  const stored = localStorage.getItem('et_model');
+  if (stored) { cachedModel = stored; return stored; }
+
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${state.apiKey}`);
+    const data = await res.json();
+    const names = (data.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => m.name.replace('models/', ''));
+
+    // Preference order: newest flash models first
+    const preferences = [
+      'gemini-flash-latest',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-flash',
+      'gemini-pro-latest',
+      'gemini-2.5-pro',
+    ];
+    let chosen = preferences.find(p => names.includes(p));
+    if (!chosen) chosen = names.find(n => n.includes('flash')) || names[0];
+    if (!chosen) throw new Error('No models available for this key');
+
+    cachedModel = chosen;
+    localStorage.setItem('et_model', chosen);
+    return chosen;
+  } catch (e) {
+    cachedModel = 'gemini-2.0-flash';
+    return cachedModel;
+  }
+}
+
 // ── GEMINI API ─────────────────────────────────────────────────────────────
 async function callGemini(userText, isInit = false) {
   if (!isInit) {
@@ -441,16 +479,28 @@ async function callGemini(userText, isInit = false) {
     generationConfig: { temperature: 0.85, maxOutputTokens: 400 }
   };
 
+  const model = await detectModel();
+
   let res, attempts = 0;
   while (attempts < 3) {
     res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${state.apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${state.apiKey}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     );
     if (res.status === 429) {
       attempts++;
       if (attempts < 3) await new Promise(r => setTimeout(r, 35000));
       else { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || 'Quota exceeded'); }
+    } else if (res.status === 404 && attempts === 0) {
+      // Model name invalid — clear cache and retry once with fresh detection
+      localStorage.removeItem('et_model');
+      cachedModel = null;
+      const fresh = await detectModel();
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${fresh}:generateContent?key=${state.apiKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      );
+      break;
     } else break;
   }
 
