@@ -774,9 +774,9 @@ function parseMessage(text) {
   if (corrMatch) { corr = corrMatch[1].trim(); main = main.replace(corrMatch[1], '').trim(); }
   if (fluMatch)  { flu  = fluMatch[0].trim();  main = main.replace(fluMatch[0], '').trim(); }
 
-  // Discard notes that are empty or just say "none"
-  if (corr && /^💡\s*\(?(none|n\/a|nenhum)\)?\.?$/i.test(corr)) corr = null;
-  if (flu && /^🗣️\s*\(?(none|n\/a|nenhum)\)?\.?$/i.test(flu)) flu = null;
+  // Discard notes that are empty or just say "none" (in various formats: (none), [none], none, etc.)
+  if (corr && /^💡\s*[\[\(]?\s*(none|n\/a|nenhum)\s*[\]\)]?\.?\s*$/i.test(corr)) corr = null;
+  if (flu && /^🗣️\s*[\[\(]?\s*(none|n\/a|nenhum)\s*[\]\)]?\.?\s*$/i.test(flu)) flu = null;
 
   // Strip residual markdown bold and stray numbered-step artifacts from leaked reasoning
   main = main.replace(/\*\*/g, '');
@@ -946,6 +946,7 @@ function startRecognition() {
   recognition.continuous = true;
   recognition.interimResults = true;
   accumulatedTranscript = '';
+  recognition._suppressEnd = false;
 
   recognition.onstart = () => {
     isRecording = true;
@@ -958,11 +959,20 @@ function startRecognition() {
     document.getElementById('mic-btn').classList.remove('recording');
     document.getElementById('mic-btn').textContent = '🎤';
     clearTimeout(silenceTimer);
+    if (recognition._suppressEnd) {
+      recognition._suppressEnd = false;
+      return; // paused for TTS — don't send, will restart after
+    }
     const finalText = accumulatedTranscript.trim();
     accumulatedTranscript = '';
     if (finalText) sendMessage(finalText);
   };
   recognition.onresult = e => {
+    // Ignore anything captured while the tutor's voice is playing (echo prevention)
+    if (window.speechSynthesis?.speaking) {
+      resetSilenceTimer();
+      return;
+    }
     micRetryCount = 0; // reset retry counter on successful result
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -1024,6 +1034,32 @@ function speak(text) {
   const voices = window.speechSynthesis.getVoices();
   const match = voices.find(v => v.lang === persona.lang) || voices.find(v => v.lang.startsWith(persona.lang.split('-')[0]));
   if (match) u.voice = match;
+
+  // Pause mic while the tutor is speaking to avoid echo capture
+  let micWasRecording = false;
+  let preservedTranscript = '';
+  u.onstart = () => {
+    if (isRecording && recognition) {
+      micWasRecording = true;
+      preservedTranscript = accumulatedTranscript;
+      clearTimeout(silenceTimer);
+      recognition._suppressEnd = true;
+      try { recognition.abort(); } catch {}
+    }
+  };
+  u.onend = u.onerror = () => {
+    if (micWasRecording) {
+      micWasRecording = false;
+      setTimeout(() => {
+        if (!isRecording) {
+          startRecognition();
+          accumulatedTranscript = preservedTranscript;
+          document.getElementById('text-input').value = preservedTranscript.trim();
+        }
+      }, 300);
+    }
+  };
+
   window.speechSynthesis.speak(u);
 }
 
